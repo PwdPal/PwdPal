@@ -1,0 +1,10 @@
+# PwdPal — security contact information
+# https://www.rfc-editor.org/rfc/rfc9116
+#
+# If you've found a security issue in PwdPal, please report it via the
+# Contact address below. Thank you for helping keep users safe.
+
+Contact: mailto:security@pwdpal.com
+Expires: 2028-01-01T00:00:00.000Z
+Canonical: https://pwdpal.com/.well-known/security.txt
+Preferred-Languages: en

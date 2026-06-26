@@ -1,0 +1,6 @@
+# PwdPal — robots policy
+User-agent: *
+Allow: /
+Disallow: /error.html
+
+# Sitemap: https://pwdpal.com/sitemap.xml

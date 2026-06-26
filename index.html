@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="auto">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="description" content="PwdPal is a deterministic password manager with no vault — it rebuilds a unique password for every site on demand, storing nothing. No account, no server.">
+  <meta name="theme-color" content="#ffffff">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <title>PwdPal — Password Manager With No Vault (Deterministic)</title>
+
+  <!-- Open Graph (social-share preview) -->
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="PwdPal">
+  <meta property="og:title" content="PwdPal — Password Manager With No Vault">
+  <meta property="og:description" content="A unique password for every site, rebuilt on demand from a phrase you remember and a pattern you draw. Nothing stored, no account, no server.">
+  <meta property="og:url" content="https://www.pwdpal.com/">
+  <meta property="og:image" content="https://www.pwdpal.com/icons/og-image.png">
+
+  <!-- Twitter / X card -->
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="PwdPal — Password Manager With No Vault">
+  <meta name="twitter:description" content="A unique password for every site, rebuilt on demand. Nothing stored, no account, no server.">
+  <meta name="twitter:image" content="https://www.pwdpal.com/icons/og-image.png">
+  <link rel="manifest" href="manifest.json?v=1.5.16">
+  <link rel="icon"
+    href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'><rect x='8' y='24' width='32' height='20' rx='4' fill='%232c71e9'/><path d='M15 24V18a9 9 0 0 1 18 0v6' fill='none' stroke='%232c71e9' stroke-width='4' stroke-linecap='round'/><circle cx='24' cy='33' r='3.5' fill='white'/><rect x='22.5' y='33' width='3' height='4.5' rx='1' fill='white'/></svg>">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png?v=1.5.16">
+  <link rel="stylesheet" href="css/style.css?v=1.5.16">
+</head>
+
+<body>
+  <!-- Settings (top-right, viewport-positioned) -->
+  <div class="settings" id="settings">
+    <button class="settings-btn" id="settings-btn" aria-label="Settings">
+      <div class="gear-icon"></div>
+    </button>
+    <div class="settings-menu" id="settings-menu">
+      <button class="settings-item" id="theme-toggle">
+        <span class="theme-icon">◑</span>
+        <span>Theme: <span class="theme-label">auto</span></span>
+      </button>
+      <button class="settings-item" id="config-change-seed">
+        <svg width="16" height="16" viewBox="2 3 36 45" fill="currentColor" style="color: var(--brand); flex-shrink: 0;">
+          <rect x="4" y="22" width="32" height="24" rx="4"/>
+          <path d="M11 22V16a9 9 0 0 1 18 0v6" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"/>
+          <circle cx="20" cy="33" r="4" fill="var(--bg, #fff)"/>
+          <rect x="18.5" y="33" width="3" height="5" rx="1" fill="var(--bg, #fff)"/>
+        </svg>
+        <span>Change seed</span>
+      </button>
+      <a class="settings-item" id="config-how-it-works" href="how-it-works.html">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--brand); flex-shrink: 0;">
+          <circle cx="12" cy="12" r="10"/>
+          <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
+          <line x1="12" y1="17" x2="12.01" y2="17"/>
+        </svg>
+        <span>How it works</span>
+      </a>
+    </div>
+  </div>
+
+  <div class="app">
+
+    <div class="content">
+
+      <!-- Logo -->
+      <div class="logo" id="logo">
+        <svg class="logo-back" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+          <path d="M15 4L7 12l8 8" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round"
+            stroke-linejoin="round" />
+        </svg>
+        <svg xmlns="http://www.w3.org/2000/svg" class="logo-img" role="img" aria-label="PwdPal">
+          <text y="40" font-family="'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif" font-size="44"
+            fill="currentColor">
+            <tspan font-weight="700">Pwd</tspan>
+            <tspan font-weight="400">Pal</tspan>
+          </text>
+          <g class="logo-lock">
+            <rect x="4" y="22" width="32" height="24" rx="4" fill="currentColor" />
+            <path d="M11 22V16a9 9 0 0 1 18 0v6" fill="none" stroke="currentColor" stroke-width="4"
+              stroke-linecap="round" />
+            <circle cx="20" cy="33" r="4" fill="var(--bg, #fff)" />
+            <rect x="18.5" y="33" width="3" height="5" rx="1" fill="var(--bg, #fff)" />
+          </g>
+        </svg>
+      </div>
+      <p class="logo-tagline" id="logo-tagline">Passwords from patterns</p>
+
+      <!-- Sliding screens container -->
+      <div class="slides" id="slides">
+
+        <!-- SCREEN 1: Seed setup -->
+        <div class="slide" id="screen-seed">
+          <div class="search-bar">
+            <input type="text" class="search-input" id="seed-input" autocomplete="off" spellcheck="false"
+              placeholder="Your personal seed">
+            <button class="btn-pill" id="seed-continue" disabled>Continue</button>
+          </div>
+          <p class="seed-tip">
+            <svg class="seed-tip-icon" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+              stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M9 18h6" />
+              <path d="M10 22h4" />
+              <path d="M12 2a7 7 0 0 0-4 12.7V17h8v-2.3A7 7 0 0 0 12 2z" />
+            </svg>
+            <span id="seed-tip-text">Remember: use a phrase that is unique to you and that you won't forget!</span>
+          </p>
+        </div>
+
+        <!-- SCREEN 2: Pattern drawing -->
+        <div class="slide" id="screen-pattern">
+          <div class="slide-subtitle" id="pattern-subtitle">Draw a pattern to use as your key</div>
+          <div class="grid-wrap">
+            <div class="pattern-container" id="pattern-grid"></div>
+            <div class="pattern-hint" id="pattern-hint">Connect at least 3 dots</div>
+          </div>
+        </div>
+
+        <!-- SCREEN 3: Domain input + saved cards -->
+        <div class="slide" id="screen-domain">
+          <div class="slide-subtitle" id="domain-subtitle">Enter a domain</div>
+
+          <!-- Collapsible input area -->
+          <div class="domain-input-area collapsed" id="domain-input-area">
+            <div class="search-bar">
+              <input type="text" class="search-input" id="domain-input" placeholder="e.g. gmail.com" autocomplete="off"
+                autocapitalize="off" spellcheck="false">
+              <input type="number" id="counter-input" value="1" min="1" max="99" hidden>
+              <button class="btn-pill" id="generate-btn" disabled>Save</button>
+            </div>
+            <!-- Password options -->
+            <div class="pwd-options" id="pwd-options">
+              <button type="button" class="pwd-option-pill pwd-rotate-btn" id="rotate-btn" aria-pressed="false" style="display: none;">Rotate</button>
+              <label class="pwd-option" title="Include uppercase letters">
+                <input type="checkbox" id="rule-uppercase" checked>
+                <span class="pwd-option-pill">A–Z</span>
+              </label>
+              <label class="pwd-option" title="Include digits">
+                <input type="checkbox" id="rule-digits" checked>
+                <span class="pwd-option-pill">0–9</span>
+              </label>
+              <label class="pwd-option" title="Include symbols">
+                <input type="checkbox" id="rule-symbols" checked>
+                <span class="pwd-option-pill">!@#</span>
+              </label>
+            </div>
+          </div>
+
+          <!-- Saved domain cards -->
+          <div class="domain-cards" id="domain-cards"></div>
+          <div class="slide-subtitle domain-edit-hint subtitle-hidden" id="domain-edit-hint">Hold to edit</div>
+        </div>
+
+      </div>
+
+    </div>
+
+    <!-- Tip banner (shown after 5 password generations) -->
+    <div class="tip-banner" id="tip-banner">
+      <button class="tip-banner-close" id="tip-banner-close" aria-label="Dismiss">✕</button>
+      <div class="tip-banner-text">
+        Got feedback? Or just want to help us keep the tool free?
+        Consider <a href="https://ko-fi.com/pwdpal" class="tip-inline-link" target="_blank" rel="noopener">supporting us
+          <svg class="tip-coffee-icon" viewBox="0 0 24 24" width="14" height="14" fill="none"
+            xmlns="http://www.w3.org/2000/svg">
+            <path d="M18 8h1a3 3 0 0 1 0 6h-1M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z" stroke="var(--brand)"
+              stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+            <path d="M6 1v3M10 1v3M14 1v3" stroke="var(--brand)" stroke-width="2" stroke-linecap="round" />
+          </svg></a>
+      </div>
+    </div>
+
+    <footer class="footer">
+      <a href="how-it-works.html" class="footer-tip-link">How it works</a>
+      <span class="footer-sep">·</span>
+      <a href="privacy.html" class="footer-tip-link">Privacy</a>
+      <span class="footer-sep" id="extension-sep" style="display: none;">·</span>
+      <a href="#" id="extension-link" class="footer-tip-link" target="_blank" rel="noopener" style="display: none;">Get the extension</a>
+      <span class="footer-sep" id="install-sep" style="display: none;">·</span>
+      <button type="button" class="footer-tip-link footer-install-link" id="install-link" style="display: none;">Install app</button>
+      <span class="footer-sep" id="support-sep">·</span>
+      <a href="https://ko-fi.com/pwdpal" id="support-link" class="footer-tip-link" target="_blank" rel="noopener">Support the project</a>
+      <span class="footer-sep">·</span>
+      <button type="button" class="footer-tip-link" id="share-link" aria-label="Share PwdPal">Share PwdPal</button>
+    </footer>
+  </div>
+
+  <script src="js/crypto.js?v=1.5.16"></script>
+  <script src="js/pattern.js?v=1.5.16"></script>
+  <script src="js/app.js?v=1.5.16"></script>
+</body>
+
+</html>

@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192">
+  <!-- Full-canvas brand background -->
+  <rect width="192" height="192" fill="#2c71e9"/>
+  <!-- Lock centred at 70% scale so it sits inside the maskable safe zone.
+       Colors are inverted (white lock + blue keyhole) for contrast on bg. -->
+  <g transform="translate(28.8 28.8) scale(2.8)">
+    <rect x="8" y="24" width="32" height="20" rx="4" fill="#ffffff"/>
+    <path d="M15 24V18a9 9 0 0 1 18 0v6" fill="none" stroke="#ffffff" stroke-width="4" stroke-linecap="round"/>
+    <circle cx="24" cy="33" r="3.5" fill="#2c71e9"/>
+    <rect x="22.5" y="33" width="3" height="4.5" rx="1" fill="#2c71e9"/>
+  </g>
+</svg>
