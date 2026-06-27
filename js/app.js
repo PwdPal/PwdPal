@@ -12,11 +12,17 @@ const App = (() => {
     let activeIndex = 0;
     let currentPattern = [];
     let userSeed = '';
-    let passwordLength = 20;
+    let passwordLength = 20;       // default length; a per-site length can override (8–64)
+    const LENGTH_MIN = 12, LENGTH_MAX = 64;  // floor 12 per Quinn's gate (ADR-007): below 12 the guarantee-fixup collision can drop a required class until the algorithm-version field lands
+    // Clamp a user-entered length to [8,64]; fall back to the default when blank/invalid.
+    const clampLength = (v) => {
+        const n = parseInt(v, 10);
+        return Number.isFinite(n) ? Math.min(LENGTH_MAX, Math.max(LENGTH_MIN, n)) : passwordLength;
+    };
     let patternInitialized = false;
     let savedDomains = [];
     let editingDomain = null;  // domain being edited, or null for new
-    const APP_VERSION = '1.5.16';
+    const APP_VERSION = '1.5.17';
 
     let domainIdleTimer = null;
     let patternIdleTimer = null;
@@ -198,6 +204,7 @@ const App = (() => {
             ruleUppercase: document.getElementById('rule-uppercase'),
             ruleDigits: document.getElementById('rule-digits'),
             ruleSymbols: document.getElementById('rule-symbols'),
+            ruleLength: document.getElementById('rule-length'),
 
             changeSeedLink: document.getElementById('config-change-seed'),
             themeToggle: document.getElementById('theme-toggle'),
@@ -313,6 +320,13 @@ const App = (() => {
             syncRotateButton();
         });
         els.generateBtn.addEventListener('click', generatePassword);
+
+        // ── Per-site length control: collapse to "len" at the default value,
+        // reveal the number on focus or whenever a non-default length is set. ──
+        if (els.ruleLength) {
+            els.ruleLength.addEventListener('input', updateLengthDisplay);
+            updateLengthDisplay();
+        }
 
         // ── Install app (footer) ──
         const installLink = document.getElementById('install-link');
@@ -752,7 +766,7 @@ const App = (() => {
                 if (matches.length === 1) {
                     const m = matches[0];
                     extensionAutoGenerate(m.domain, {
-                        length: passwordLength,
+                        length: m.length || passwordLength,
                         uppercase: m.uppercase,
                         digits: m.digits,
                         symbols: m.symbols
@@ -795,7 +809,8 @@ const App = (() => {
                 domain: finalDomain,
                 uppercase: rules.uppercase,
                 digits: rules.digits,
-                symbols: rules.symbols
+                symbols: rules.symbols,
+                length: rules.length || passwordLength
             });
             saveDomains();
         }
@@ -1168,7 +1183,7 @@ const App = (() => {
             // Migrate old string[] format to object[]
             savedDomains = raw.map(d => {
                 if (typeof d === 'string') {
-                    return { domain: d, uppercase: true, digits: true, symbols: true };
+                    return { domain: d, uppercase: true, digits: true, symbols: true, length: passwordLength };
                 }
                 return d;
             });
@@ -1191,7 +1206,8 @@ const App = (() => {
             domain,
             uppercase: els.ruleUppercase.checked,
             digits: els.ruleDigits.checked,
-            symbols: els.ruleSymbols.checked
+            symbols: els.ruleSymbols.checked,
+            length: clampLength(els.ruleLength?.value)
         };
 
         // Update in-place if exists, otherwise prepend (new cards at head)
@@ -1511,7 +1527,7 @@ const App = (() => {
                 card.addEventListener('click', (e) => {
                     if (e.target.closest('.domain-card-remove')) return;
                     extensionAutoGenerate(entry.domain, {
-                        length: passwordLength,
+                        length: entry.length || passwordLength,
                         uppercase: entry.uppercase,
                         digits: entry.digits,
                         symbols: entry.symbols
@@ -1693,7 +1709,7 @@ const App = (() => {
         const domain = entry.domain.replace(/^https?:\/\//, '').replace(/^www\./, '');
         const counter = parseInt(els.counterInput.value) || 1;
         const rules = {
-            length: passwordLength,
+            length: entry.length || passwordLength,
             uppercase: entry.uppercase,
             digits: entry.digits,
             symbols: entry.symbols
@@ -2015,6 +2031,7 @@ const App = (() => {
             els.ruleUppercase.checked = entry.uppercase;
             els.ruleDigits.checked = entry.digits;
             els.ruleSymbols.checked = entry.symbols;
+            if (els.ruleLength) { els.ruleLength.value = entry.length || passwordLength; updateLengthDisplay(); }
             updateGenerateState();
             showInputArea(card);
             // Clean up listeners
@@ -2214,6 +2231,20 @@ const App = (() => {
     }
 
     function showInputArea(fromElement) {
+        // Restore any card still hidden as a placeholder by a previous
+        // showInputArea call that never resolved into a save/cancel — e.g.
+        // the user clicked "+" (which hides the Add button) and then
+        // long-pressed an existing card to edit instead. Without this, the
+        // Add button stays invisible while editing, so the user can't click
+        // "new" to switch back to creating a card. Skip fromElement, which
+        // this call is about to turn into its own placeholder.
+        els.domainCards.querySelectorAll('.domain-card-placeholder').forEach(c => {
+            if (c !== fromElement) {
+                c.classList.remove('domain-card-placeholder');
+                c.style.cssText = '';
+            }
+        });
+
         els.domainSubtitle.textContent = editingDomain
             ? TEXT.domainSubtitleEditing(editingDomain)
             : TEXT.domainSubtitleNew;
@@ -2749,6 +2780,17 @@ const App = (() => {
         els.generateBtn.disabled = !ok;
     }
 
+    // Collapse the length control to just "len" at the default; reveal the number
+    // when focused (CSS :focus-within) or whenever a non-default length is set
+    // (this class). Cosmetic only — the saved value is clamped on save.
+    function updateLengthDisplay() {
+        if (!els.ruleLength) return;
+        const container = els.ruleLength.closest('.pwd-option-length');
+        if (container) {
+            container.classList.toggle('length-custom', clampLength(els.ruleLength.value) !== passwordLength);
+        }
+    }
+
     async function generatePassword() {
         const rawDomain = els.domainInput.value.trim();
         const domain = rawDomain
@@ -2756,7 +2798,7 @@ const App = (() => {
         const counter = parseInt(els.counterInput.value) || 1;
 
         const rules = {
-            length: passwordLength,
+            length: clampLength(els.ruleLength?.value),
             uppercase: els.ruleUppercase.checked,
             digits: els.ruleDigits.checked,
             symbols: els.ruleSymbols.checked
@@ -2782,6 +2824,7 @@ const App = (() => {
                     savedDomains[idx].uppercase = els.ruleUppercase.checked;
                     savedDomains[idx].digits = els.ruleDigits.checked;
                     savedDomains[idx].symbols = els.ruleSymbols.checked;
+                    savedDomains[idx].length = clampLength(els.ruleLength?.value);
                     saveDomains();
                 }
             } else {

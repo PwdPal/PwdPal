@@ -23,11 +23,11 @@
   <meta name="twitter:title" content="PwdPal — Password Manager With No Vault">
   <meta name="twitter:description" content="A unique password for every site, rebuilt on demand. Nothing stored, no account, no server.">
   <meta name="twitter:image" content="https://www.pwdpal.com/icons/og-image.png">
-  <link rel="manifest" href="manifest.json?v=1.5.16">
+  <link rel="manifest" href="manifest.json?v=1.5.17">
   <link rel="icon"
     href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'><rect x='8' y='24' width='32' height='20' rx='4' fill='%232c71e9'/><path d='M15 24V18a9 9 0 0 1 18 0v6' fill='none' stroke='%232c71e9' stroke-width='4' stroke-linecap='round'/><circle cx='24' cy='33' r='3.5' fill='white'/><rect x='22.5' y='33' width='3' height='4.5' rx='1' fill='white'/></svg>">
-  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png?v=1.5.16">
-  <link rel="stylesheet" href="css/style.css?v=1.5.16">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png?v=1.5.17">
+  <link rel="stylesheet" href="css/style.css?v=1.5.17">
 </head>
 
 <body>
@@ -132,7 +132,6 @@
             </div>
             <!-- Password options -->
             <div class="pwd-options" id="pwd-options">
-              <button type="button" class="pwd-option-pill pwd-rotate-btn" id="rotate-btn" aria-pressed="false" style="display: none;">Rotate</button>
               <label class="pwd-option" title="Include uppercase letters">
                 <input type="checkbox" id="rule-uppercase" checked>
                 <span class="pwd-option-pill">A–Z</span>
@@ -145,6 +144,10 @@
                 <input type="checkbox" id="rule-symbols" checked>
                 <span class="pwd-option-pill">!@#</span>
               </label>
+              <label class="pwd-option pwd-option-length" title="Password length (12–64 characters)">
+                <span class="pwd-length-tag">len</span><input type="number" id="rule-length" class="pwd-length-input" min="12" max="64" step="1" value="20" inputmode="numeric" aria-label="Password length, 12 to 64 characters">
+              </label>
+              <button type="button" class="pwd-option-pill pwd-rotate-btn" id="rotate-btn" aria-pressed="false" style="display: none;">rotate</button>
             </div>
           </div>
 
@@ -187,9 +190,9 @@
     </footer>
   </div>
 
-  <script src="js/crypto.js?v=1.5.16"></script>
-  <script src="js/pattern.js?v=1.5.16"></script>
-  <script src="js/app.js?v=1.5.16"></script>
+  <script src="js/crypto.js?v=1.5.17"></script>
+  <script src="js/pattern.js?v=1.5.17"></script>
+  <script src="js/app.js?v=1.5.17"></script>
 </body>
 
 </html>

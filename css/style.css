@@ -624,6 +624,71 @@ body {
   border-color: var(--border-hover);
 }
 
+/* Per-site length control — progressive disclosure: collapsed to just "len" at
+   the default length, and expanded to reveal the number on focus (:focus-within)
+   or whenever a non-default length is set (.length-custom, toggled in JS). A
+   non-default length stays visible + brand-highlighted as a persistent indicator. */
+.pwd-option-length {
+  display: inline-flex;
+  align-items: stretch;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-3);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  overflow: hidden;
+  transition: all 0.15s ease;
+  cursor: text;
+}
+.pwd-option-length:hover {
+  border-color: var(--border-hover);
+}
+.pwd-option-length:focus-within,
+.pwd-option-length.length-custom {
+  color: var(--brand);
+  background: rgba(44, 113, 233, 0.08);
+  border-color: var(--brand);
+}
+.pwd-length-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 12px;
+  transition: padding 0.15s ease;
+}
+.pwd-option-length:focus-within .pwd-length-tag,
+.pwd-option-length.length-custom .pwd-length-tag {
+  padding: 4px 3px 4px 10px;
+}
+.pwd-length-input {
+  width: 0;
+  padding: 4px 0;
+  border: none;
+  background: transparent;
+  font: inherit;
+  color: var(--brand);
+  text-align: left;
+  opacity: 0;
+  -moz-appearance: textfield;
+  appearance: textfield;
+  transition: width 0.15s ease, padding 0.15s ease, opacity 0.15s ease;
+}
+.pwd-option-length:focus-within .pwd-length-input,
+.pwd-option-length.length-custom .pwd-length-input {
+  width: 22px;
+  padding: 4px 8px 4px 1px;
+  opacity: 1;
+}
+.pwd-length-input:focus {
+  outline: none;
+}
+.pwd-length-input::-webkit-outer-spin-button,
+.pwd-length-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
 /* Rotate toggle — pill shape inherited from .pwd-option-pill. Mirrors the
    checked/unchecked styling of the option pills via aria-pressed: off when
    no "#..." suffix is present on the domain, on when one is. */
