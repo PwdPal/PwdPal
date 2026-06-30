@@ -10,7 +10,7 @@
 //
 // IMPORTANT: bump VERSION below whenever you bump the version in index.html / app.js.
 
-const VERSION = '1.5.17';
+const VERSION = '1.5.18';
 const CACHE_NAME = `pwdpal-${VERSION}`;
 const ASSETS = [
     '/',

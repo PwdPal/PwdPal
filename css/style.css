@@ -400,6 +400,57 @@ body {
   margin-bottom: 0;
 }
 
+/* Options editor variant: light-bulb glyph + the "different password" warning,
+   styled like the seed-change tip (.seed-tip): 12px text, var(--text-3), bulb at
+   0.7 opacity sitting just left of the text. Centered, sat a little lower, with
+   an optional "reset to saved options" link stacked below. */
+.domain-edit-hint.edit-hint-tip {
+  display: flex;
+  justify-content: center;
+  margin-top: 34px;
+  font-size: 12px;
+  color: var(--text-3);
+  opacity: 1;
+}
+/* Icon + text column on one row, so the bulb hugs the text's left edge
+   (matching the seed tip) rather than floating far out in the margin. */
+.edit-hint-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+/* Text + reset link stack in a centered column, so the link lines up
+   vertically with the hint text (not the whole bulb+text row). */
+.edit-hint-col {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+.edit-hint-text {
+  text-align: center;
+  line-height: 1.35;
+}
+.edit-hint-icon {
+  flex-shrink: 0;
+  opacity: 0.7;
+}
+.edit-hint-reset {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  font-family: var(--font);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-3); /* same grey as the hint text, not brand blue */
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.edit-hint-reset:hover {
+  color: var(--text-2);
+}
+
 .slide-subtitle p {
   margin: 0 0 8px 0;
 }
@@ -687,6 +738,26 @@ body {
 .pwd-length-input::-webkit-inner-spin-button {
   -webkit-appearance: none;
   margin: 0;
+}
+
+/* Restore-options glyph (circular arrows) — sits at the far left of the options
+   row (margin-right:auto absorbs the free space, leaving the pills right-aligned).
+   Shown only in the extension options editor while the options differ from the
+   saved/just-used baseline; click reverts them. */
+.pwd-restore-btn {
+  margin-right: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-3);
+  transition: color 0.15s ease;
+}
+.pwd-restore-btn:hover {
+  color: var(--brand);
 }
 
 /* Rotate toggle — pill shape inherited from .pwd-option-pill. Mirrors the

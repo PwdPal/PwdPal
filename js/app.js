@@ -22,7 +22,7 @@ const App = (() => {
     let patternInitialized = false;
     let savedDomains = [];
     let editingDomain = null;  // domain being edited, or null for new
-    const APP_VERSION = '1.5.17';
+    const APP_VERSION = '1.5.18';
 
     let domainIdleTimer = null;
     let patternIdleTimer = null;
@@ -41,9 +41,23 @@ const App = (() => {
     // Extension popup: true while the post-pattern thumbs-up confirmation
     // overlay is on screen. Used to block back-navigation (logo click and
     // browser-back) so users can't peek behind the overlay at the pattern
-    // grid or cards container they came from. Never reset — the popup
+    // grid or cards container they came from. Reset to false when the user
+    // opens the overlay's "Options" editor (openExtensionOptions tears the
+    // overlay down and returns to an editable screen); otherwise the popup
     // closes on focus loss and the JS context dies with it.
     let extConfirmationActive = false;
+
+    // Extension popup: true only between opening the overlay "Options" editor
+    // (openExtensionOptions) and saving it, so the shared generatePassword()
+    // Save handler routes to the extension-mode save (saveExtensionOptions —
+    // which regenerates + re-copies + re-shows the thumbs-up) instead of the
+    // web pill-back-to-card flow. Cleared on save and on every non-Save exit.
+    let extOptionsMode = false;
+
+    // The rules the password was last generated with when the options editor
+    // opened (saved card's rules, or the just-used defaults). The "different
+    // password" hint shows only while the form differs from this baseline.
+    let extOptionsBaseline = null;
 
     // PWA install — stash Chrome's deferred install event so we can trigger it
     // from our own footer entry rather than letting Chrome show its auto-banner.
@@ -144,6 +158,39 @@ const App = (() => {
     const THUMBS_UP_HOLD_MS = 2000;
     const THUMBS_UP_FADE_OUT_MS = 400;
 
+    // ── Occasional post-copy hints ──────────────────────────────────────────
+    // The transient countdown-ring messages shown for a few seconds after a
+    // card copy. Single source of truth — rendered by showTimedHint() in the
+    // real copy flow (picked by trigger condition) AND replayed in order by
+    // the dev sequence (playPostCopyHintSequence), so the preview can never
+    // drift from what users actually see. Order in POST_COPY_HINTS is the order a
+    // user first meets them: the pattern note on the very first copy, then the
+    // security reminder on the SECURITY_HINT_THRESHOLD-th copy.
+    const HINT_ICONS = {
+        bulb: `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6"/><path d="M10 22h4"/><path d="M12 2a7 7 0 0 0-4 12.7V17h8v-2.3A7 7 0 0 0 12 2z"/></svg>`,
+        lock: `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>`
+    };
+    const POST_COPY_HINTS = [
+        {
+            key: 'pattern',
+            sentences: [`Note, your pattern is never stored — you'll draw it each time.`],
+            maxWidth: 180,
+            seconds: PATTERN_HINT_SECONDS,
+            icon: HINT_ICONS.bulb
+        },
+        {
+            key: 'security',
+            sentences: [
+                `Remember, only you know your pattern and seed — that's what keeps you secure.`,
+                `The flip side: forget either, and your passwords are gone.`
+            ],
+            maxWidth: 180,
+            seconds: SECURITY_HINT_SECONDS,
+            icon: HINT_ICONS.lock
+        }
+    ];
+    const HINT_BY_KEY = Object.fromEntries(POST_COPY_HINTS.map(h => [h.key, h]));
+
     const THEMES = ['auto', 'light', 'dark'];
     const THEME_ICONS = {
         auto: '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm0 18V4a8 8 0 1 1 0 16z"/></svg>',
@@ -205,6 +252,7 @@ const App = (() => {
             ruleDigits: document.getElementById('rule-digits'),
             ruleSymbols: document.getElementById('rule-symbols'),
             ruleLength: document.getElementById('rule-length'),
+            optionsRestoreBtn: document.getElementById('options-restore-btn'),
 
             changeSeedLink: document.getElementById('config-change-seed'),
             themeToggle: document.getElementById('theme-toggle'),
@@ -246,6 +294,11 @@ const App = (() => {
                 // cards container the user came from peek through
                 // behind the overlay.
                 if (extConfirmationActive) return;
+                // No back from the extension options editor — it's a focused,
+                // overlay-launched task with no sensible "back" target, so the
+                // chevron is hidden (see openExtensionOptions) and the click is
+                // inert too.
+                if (extOptionsMode) return;
                 // If a timed hint is up, treat the back button as "expedite":
                 // run its dismiss (fade out + navigate + restoreUI) immediately.
                 if (activeHintDismiss) {
@@ -253,6 +306,7 @@ const App = (() => {
                     return;
                 }
                 if (activeIndex === 2) {
+                    extOptionsMode = false;  // leaving the editor without saving
                     goToScreen(1, true);
                 } else if (activeIndex === 0 && userSeed !== '') {
                     goToScreen(1, true);
@@ -324,9 +378,15 @@ const App = (() => {
         // ── Per-site length control: collapse to "len" at the default value,
         // reveal the number on focus or whenever a non-default length is set. ──
         if (els.ruleLength) {
-            els.ruleLength.addEventListener('input', updateLengthDisplay);
+            els.ruleLength.addEventListener('input', () => { updateLengthDisplay(); updateOptionsHint(); });
             updateLengthDisplay();
         }
+        // In the options editor, any option change toggles the "different
+        // password" hint + restore glyph (no-op outside the editor).
+        [els.ruleUppercase, els.ruleDigits, els.ruleSymbols].forEach(cb => {
+            if (cb) cb.addEventListener('change', updateOptionsHint);
+        });
+        if (els.optionsRestoreBtn) els.optionsRestoreBtn.addEventListener('click', resetOptionsToBaseline);
 
         // ── Install app (footer) ──
         const installLink = document.getElementById('install-link');
@@ -563,6 +623,18 @@ const App = (() => {
     function syncEditHint() {
         const editHint = document.getElementById('domain-edit-hint');
         if (!editHint) return;
+
+        // Extension options editor ("⋮"): there are no cards to long-press, so
+        // "Hold to edit" is meaningless — the reactive "different password" hint
+        // takes over (shown only while the form differs from the baseline).
+        if (extOptionsMode) {
+            if (editHintRevealTimer) { clearTimeout(editHintRevealTimer); editHintRevealTimer = null; }
+            updateOptionsHint();
+            return;
+        }
+        editHint.classList.remove('edit-hint-tip');
+        editHint.textContent = 'Hold to edit';
+
         const subtitleHidden = els.domainSubtitle.classList.contains('subtitle-hidden');
         // In extension filtered-cards mode, editing isn't available — hide
         // the "Hold to edit" hint regardless of other state.
@@ -589,6 +661,63 @@ const App = (() => {
                 if (stillEligible) editHint.classList.remove('subtitle-hidden');
             }, EDIT_HINT_REVEAL_DELAY);
         }
+    }
+
+    // Options editor: show the "different password" hint (light-bulb glyph +
+    // warning, styled like the seed tip) only while the form's options differ
+    // from the baseline they were opened with — i.e. only when changing them
+    // would actually produce a different password than the saved/just-used one.
+    function updateOptionsHint() {
+        if (!extOptionsMode) return;
+        const editHint = document.getElementById('domain-edit-hint');
+        if (!editHint || !extOptionsBaseline) return;
+        const b = extOptionsBaseline;
+        const differs = clampLength(els.ruleLength?.value) !== b.length
+            || els.ruleUppercase.checked !== b.uppercase
+            || els.ruleDigits.checked !== b.digits
+            || els.ruleSymbols.checked !== b.symbols;
+        // The restore glyph (circular arrows, left of the option pills) appears
+        // alongside the hint whenever the options differ — click it to revert.
+        if (els.optionsRestoreBtn) els.optionsRestoreBtn.style.display = differs ? 'inline-flex' : 'none';
+        if (!differs) {
+            // Drop the tip class too — its opacity:1 would otherwise win over
+            // .subtitle-hidden's opacity:0 (equal specificity, later source).
+            editHint.classList.remove('edit-hint-tip');
+            editHint.classList.add('subtitle-hidden');
+            editHint.innerHTML = '';
+            // The hint contributed height; recompute so the slide (overflow:
+            // hidden, fixed height) releases the now-empty space.
+            refreshSlideHeight();
+            return;
+        }
+        // Already showing → leave it (the content is static for the session).
+        if (editHint.classList.contains('edit-hint-tip') && !editHint.classList.contains('subtitle-hidden')) return;
+        // Light-bulb glyph (same as the seed tip) + balanced two-line warning.
+        editHint.classList.add('edit-hint-tip');
+        editHint.innerHTML =
+            '<span class="edit-hint-row">' +
+              '<svg class="edit-hint-icon" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6"/><path d="M10 22h4"/><path d="M12 2a7 7 0 0 0-4 12.7V17h8v-2.3A7 7 0 0 0 12 2z"/></svg>' +
+              '<span class="edit-hint-text">These options will result<br>in a different password</span>' +
+            '</span>';
+        editHint.classList.remove('subtitle-hidden');
+        // The hint just added height below the form; grow the slide so it isn't
+        // clipped by .slides { overflow: hidden } (the slide height was fixed by
+        // refreshSlideHeight while the hint was empty when the editor opened).
+        refreshSlideHeight();
+    }
+
+    // Restore the form to the options the editor opened with (a saved site's
+    // stored rules), so saving won't change the generated password. Hides the
+    // hint as a side effect (the form now matches the baseline).
+    function resetOptionsToBaseline() {
+        if (!extOptionsBaseline) return;
+        const b = extOptionsBaseline;
+        if (els.ruleLength) els.ruleLength.value = b.length;
+        els.ruleUppercase.checked = b.uppercase;
+        els.ruleDigits.checked = b.digits;
+        els.ruleSymbols.checked = b.symbols;
+        updateLengthDisplay();
+        updateOptionsHint();
     }
 
     function onPopState(e) {
@@ -744,6 +873,7 @@ const App = (() => {
 
     function onPatternComplete(pattern) {
         currentPattern = pattern;
+        extOptionsMode = false;  // a fresh pattern draw is never an options-save
         updateGenerateState();
 
         // Auto-advance to domain screen after brief pause
@@ -766,7 +896,7 @@ const App = (() => {
                 if (matches.length === 1) {
                     const m = matches[0];
                     extensionAutoGenerate(m.domain, {
-                        length: m.length || passwordLength,
+                        length: clampLength(m.length || passwordLength),
                         uppercase: m.uppercase,
                         digits: m.digits,
                         symbols: m.symbols
@@ -943,14 +1073,22 @@ const App = (() => {
         let confirmation = document.getElementById('ext-auto-gen-overlay');
         const firstTime = !confirmation;
 
+        // Resolve the anchor up front: the firstTime branch bursts it into
+        // smoke, and the Options link handler restores it after tearing the
+        // overlay down (dustExplode leaves it shrunk/faded).
+        const anchorEl = explodeEl || document.getElementById('pattern-grid');
+
         if (firstTime) {
             // Hide pattern subtitle + hint so the overlay stands alone
             const patternSubtitle = document.getElementById('pattern-subtitle');
             if (patternSubtitle) patternSubtitle.classList.add('subtitle-hidden');
             const patternHint = document.getElementById('pattern-hint');
             if (patternHint) patternHint.classList.add('hidden');
-            // Hide cards-page chrome too (in case we came from filtered-cards)
+            // Hide cards-page chrome too (in case we came from filtered-cards),
+            // and cancel any pending idle-reveal timer so it can't fade the
+            // subtitle back in over this overlay seconds later.
             if (els && els.domainSubtitle) els.domainSubtitle.classList.add('subtitle-hidden');
+            if (domainIdleTimer) { clearTimeout(domainIdleTimer); domainIdleTimer = null; }
             const editHint = document.getElementById('domain-edit-hint');
             if (editHint) editHint.classList.add('subtitle-hidden');
             // Hide the back chevron — it's still on because the filtered-cards
@@ -967,7 +1105,6 @@ const App = (() => {
             // click handler and popstate guard both read this flag.
             extConfirmationActive = true;
 
-            const anchorEl = explodeEl || document.getElementById('pattern-grid');
             // Capture the pre-transform rect BEFORE kicking off dustExplode —
             // once the transform is applied, getBoundingClientRect would
             // report the scaled-down geometry instead of where the element
@@ -1030,22 +1167,30 @@ const App = (() => {
             </svg>
             <div class="ext-headline" style="font-size: 20px; font-weight: 700; color: #909090; margin-top: 14px; font-family: var(--font); letter-spacing: 0.5px;">${headline}</div>
             <div class="ext-domain" style="font-size: 13px; font-weight: 700; color: #909090; margin-top: 12px; font-family: var(--font); letter-spacing: 0.5px; text-align: center;">${base}${rotationHtml}</div>
-            ${showRotate ? '<button type="button" class="btn-pill ext-rotate-btn">Rotate</button>' : ''}
+            ${showRotate ? `<div class="ext-action-pill">
+              <button type="button" class="btn-pill ext-rotate-btn">Rotate</button>
+              <button type="button" class="btn-pill ext-more-btn" aria-label="More options" title="Options">⋮</button>
+            </div>` : ''}
         `;
+
+        // The action pill (Rotate + a "⋮" more-options segment). Fade the whole
+        // pill in just after the success state settles.
+        const actionPill = confirmation.querySelector('.ext-action-pill');
+        if (actionPill) setTimeout(() => actionPill.classList.add('visible'), 50);
 
         const rotateBtn = confirmation.querySelector('.ext-rotate-btn');
         if (rotateBtn) {
-            // Fade the button in slightly after the rest so it reads as a
-            // secondary option rather than competing with the success state.
-            setTimeout(() => rotateBtn.classList.add('visible'), 50);
             rotateBtn.addEventListener('click', async () => {
                 rotateBtn.disabled = true;
 
-                // Fade the button out (rather than exploding it) — the
-                // thumbs-up stays put so the progress ring can wrap around
-                // it as the rotation animation runs.
-                rotateBtn.style.transition = 'opacity 0.25s ease-out';
-                rotateBtn.style.opacity = '0';
+                // Fade the whole action pill out (rotate + the "⋮" segment) —
+                // after a rotation there are no further actions on this overlay,
+                // and the "⋮" closure holds the now-stale pre-rotation domain.
+                // The thumbs-up stays put so the progress ring can wrap it.
+                if (actionPill) {
+                    actionPill.style.transition = 'opacity 0.25s ease-out';
+                    actionPill.style.opacity = '0';
+                }
 
                 const headlineEl = confirmation.querySelector('.ext-headline');
                 const domainEl = confirmation.querySelector('.ext-domain');
@@ -1057,7 +1202,7 @@ const App = (() => {
                 const BUTTON_FADE_OUT_MS = 250;
                 const ROTATING_MS = 1850;
                 setTimeout(() => {
-                    rotateBtn.remove();
+                    if (actionPill) actionPill.remove();
                     if (headlineEl) {
                         headlineEl.textContent = 'rotating…';
                         headlineEl.classList.add('shimmer');
@@ -1164,12 +1309,232 @@ const App = (() => {
             });
         }
 
+        // Wire the "⋮" more-options segment: open the in-place options editor
+        // for this site, transforming the pill into the edit form (the add-card
+        // animation). Pass the "⋮" rect as the flight source, and the overlay
+        // anchor so it can be un-exploded when the overlay tears down.
+        const moreBtn = confirmation.querySelector('.ext-more-btn');
+        if (moreBtn) {
+            moreBtn.addEventListener('click', () => {
+                const fromRect = moreBtn.getBoundingClientRect();
+                openExtensionOptions(domain, rules, anchorEl, fromRect);
+            });
+        }
+
         if (firstTime) {
             void confirmation.offsetHeight;
             setTimeout(() => {
                 confirmation.style.opacity = '1';
                 confirmation.style.transform = 'scale(1)';
             }, 50);
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Extension overlay "Options" editor
+    //
+    // The extension auto-fills with default options the instant you draw your
+    // pattern, so the per-site length / character-class controls are otherwise
+    // unreachable for a new site. The "Options" link on the thumbs-up overlay
+    // routes to the EXISTING screen-3 options form (reusing its clamping +
+    // persistence) rather than a second form: openExtensionOptions reveals the
+    // prefilled form; Save runs through generatePassword → saveExtensionOptions,
+    // which persists the choice, regenerates, re-copies, and re-shows the
+    // thumbs-up.
+    // ─────────────────────────────────────────────────────────────────────
+
+    // dustExplode() leaves an element shrunk + faded with inline styles and
+    // never restores it (the popup normally just closes). Clearing them makes
+    // the element visible again when we return to the screen that hosts it.
+    function restoreExplodedEl(el) {
+        if (!el) return;
+        el.style.transition = '';
+        el.style.transform = '';
+        el.style.opacity = '';
+    }
+
+    function openExtensionOptions(domain, rules, anchorEl, fromRect) {
+        // Tear the overlay down and re-enable navigation + chrome.
+        document.getElementById('ext-auto-gen-overlay')?.remove();
+        extConfirmationActive = false;
+        document.getElementById('settings')?.classList.remove('confirmation-hidden');
+
+        // Isolated edit view — no other cards, no Add button, just this site's
+        // form. (Also leave any filtered-cards mode.)
+        window.pwdpalFilteredHost = null;
+        els.domainCards.innerHTML = '';
+
+        // Un-explode whatever the overlay burst (pattern grid / cards / search
+        // bar) and the screen-2 content the save path fades, so the editable
+        // screen renders clean.
+        restoreExplodedEl(anchorEl);
+        restoreExplodedEl(els.domainCards);
+        restoreExplodedEl(els.domainInputArea);
+
+        extOptionsMode = true;
+        // Baseline = the rules this site's password was just generated with, so
+        // the hint only shows once the user actually changes one of them.
+        extOptionsBaseline = {
+            length: clampLength(rules.length || passwordLength),
+            uppercase: rules.uppercase, digits: rules.digits, symbols: rules.symbols
+        };
+        // Existing card → update in place on save; brand-new site → addDomain.
+        editingDomain = savedDomains.some(d => d.domain === domain) ? domain : null;
+
+        // Prefill the form from the rules we just generated with (mirrors the
+        // long-press edit populate). currentPattern / userSeed survive, so Save
+        // stays enabled.
+        els.domainInput.disabled = false;
+        els.domainInput.value = domain;
+        els.ruleUppercase.checked = rules.uppercase;
+        els.ruleDigits.checked = rules.digits;
+        els.ruleSymbols.checked = rules.symbols;
+        if (els.ruleLength) { els.ruleLength.value = rules.length || passwordLength; updateLengthDisplay(); }
+        els.generateBtn.textContent = TEXT.btnSave;
+        els.generateBtn.classList.remove('copied');
+
+        // Expand the input area invisibly so we can measure the search bar as
+        // the pill's flight target.
+        const inputArea = els.domainInputArea;
+        const searchBar = inputArea.querySelector('.search-bar');
+        inputArea.style.transition = 'none';
+        inputArea.classList.remove('collapsed');
+        inputArea.style.opacity = '0';
+        inputArea.style.pointerEvents = 'none';
+        void inputArea.offsetHeight;
+        inputArea.style.transition = '';
+
+        // Snap to the domain screen WITHOUT the horizontal slide — the overlay
+        // covered it, and we want the "⋮" pill to transform into the form (the
+        // add-card animation), not a screen swipe.
+        els.slides.classList.add('no-transition');
+        goToScreen(2, false);
+        void els.slides.offsetHeight;
+        els.slides.classList.remove('no-transition');
+        // No back chevron in the options editor — goToScreen(2) turns it on for
+        // the normal domain screen, but this editor is a focused overlay-launched
+        // task with no sensible "back" target.
+        document.getElementById('logo')?.classList.remove('show-back');
+        els.domainSubtitle.textContent = editingDomain
+            ? TEXT.domainSubtitleEditing(domain)
+            : TEXT.domainSubtitleNew;
+        els.domainSubtitle.classList.remove('subtitle-hidden');
+
+        const revealForm = () => {
+            // This reveal is deferred (pill-flight transitionend / 360ms timeout).
+            // A quick Save fires saveExtensionOptions FIRST — it sets extOptionsMode
+            // = false and fades this form out for the thumbs-up. If we then ran, we'd
+            // re-reveal the form (and its "github.com" input) over the confirmation
+            // overlay. Bail when the editor has already been torn down by a save.
+            if (!extOptionsMode) return;
+            inputArea.style.opacity = '';
+            inputArea.style.pointerEvents = '';
+            els.domainInput.disabled = false;
+            els.domainInput.focus();
+            updateGenerateState();
+            refreshSlideHeight();
+        };
+
+        // Fly a pill from the "⋮" segment to the search bar — the same transform
+        // as clicking the Add card. Instant reveal if we somehow have no source.
+        const toRect = searchBar.getBoundingClientRect();
+        if (!fromRect) { revealForm(); return; }
+
+        const pill = document.createElement('div');
+        pill.className = 'flying-pill';
+        Object.assign(pill.style, {
+            position: 'fixed',
+            left: fromRect.left + 'px', top: fromRect.top + 'px',
+            width: fromRect.width + 'px', height: fromRect.height + 'px',
+            background: 'var(--brand)', border: 'none', borderRadius: '20px',
+            zIndex: '100', transition: 'none', pointerEvents: 'none'
+        });
+        document.body.appendChild(pill);
+        void pill.offsetHeight;
+        requestAnimationFrame(() => {
+            Object.assign(pill.style, {
+                transition: 'all 300ms cubic-bezier(0.4, 0, 0.2, 1)',
+                left: toRect.left + 'px', top: toRect.top + 'px',
+                width: toRect.width + 'px', height: toRect.height + 'px',
+                borderRadius: 'var(--radius)', background: 'var(--surface)',
+                boxShadow: 'var(--shadow-search)'
+            });
+            let done = false;
+            const finish = () => { if (done) return; done = true; pill.remove(); revealForm(); };
+            pill.addEventListener('transitionend', finish, { once: true });
+            setTimeout(finish, 360);
+        });
+    }
+
+    async function saveExtensionOptions() {
+        // Read rules from the form exactly as generatePassword does, and
+        // normalize the domain IDENTICALLY to addDomain so the persisted card
+        // key and the generation domain are byte-identical (round-trip safety).
+        const rules = {
+            length: clampLength(els.ruleLength?.value),
+            uppercase: els.ruleUppercase.checked,
+            digits: els.ruleDigits.checked,
+            symbols: els.ruleSymbols.checked
+        };
+        const domain = els.domainInput.value.toLowerCase().trim()
+            .replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/$/, '');
+        if (!domain) return;
+
+        els.generateBtn.disabled = true;  // guard double-submit
+
+        // Persist the choice as a saved card so it sticks next visit. Mirror
+        // generatePassword: in-place update when editing, otherwise addDomain
+        // upsert (which re-reads the same form fields → stores exactly `rules`).
+        if (editingDomain) {
+            const idx = savedDomains.findIndex(d => d.domain === editingDomain);
+            if (idx >= 0) {
+                savedDomains[idx].domain = domain;
+                savedDomains[idx].uppercase = rules.uppercase;
+                savedDomains[idx].digits = rules.digits;
+                savedDomains[idx].symbols = rules.symbols;
+                savedDomains[idx].length = rules.length;
+                saveDomains();
+            } else {
+                addDomain(domain);
+            }
+        } else {
+            addDomain(domain);
+        }
+
+        extOptionsMode = false;
+        editingDomain = null;
+
+        // Hide the options hint + restore glyph. The hint is a SIBLING of the
+        // faded input area / cards (not a child), so it would otherwise stay
+        // visible behind the thumbs-up overlay after Save.
+        const editHint = document.getElementById('domain-edit-hint');
+        if (editHint) { editHint.classList.add('subtitle-hidden'); editHint.classList.remove('edit-hint-tip'); editHint.innerHTML = ''; }
+        if (els.optionsRestoreBtn) els.optionsRestoreBtn.style.display = 'none';
+        // Same for the "Editing <domain>" subtitle openExtensionOptions set: snap
+        // it hidden NOW (subtitle-hidden is instant), not after the async password
+        // derivation — otherwise it lingers over the thumbs-up during that window.
+        // Also cancel any pending idle-reveal timer (renderDomainCards schedules
+        // one ~5s out for experienced users); if it fires after a quick Save it
+        // re-removes subtitle-hidden and fades the subtitle in over the thumbs-up.
+        els.domainSubtitle.classList.add('subtitle-hidden');
+        if (domainIdleTimer) { clearTimeout(domainIdleTimer); domainIdleTimer = null; }
+
+        // Anchor the re-shown overlay over the search bar, and fade the screen-2
+        // content so nothing peeks behind the centered thumbs-up.
+        const anchor = els.domainInputArea.querySelector('.search-bar');
+        els.domainCards.style.transition = 'opacity 0.2s ease-out';
+        els.domainCards.style.opacity = '0';
+        els.domainInputArea.style.transition = 'opacity 0.2s ease-out';
+        els.domainInputArea.style.opacity = '0';
+
+        try {
+            // No `rotate`, so performExtensionGeneration does NOT re-persist
+            // (we already saved above) — it derives once, copies, autofills.
+            const finalDomain = await performExtensionGeneration(domain, rules);
+            showExtensionAutoGenerateConfirmation(finalDomain, false, anchor, rules, false);
+        } catch (err) {
+            console.error('Extension options save failed:', err);
+            showExtensionAutoGenerateConfirmation(domain, true, anchor, rules, false);
         }
     }
 
@@ -1527,7 +1892,7 @@ const App = (() => {
                 card.addEventListener('click', (e) => {
                     if (e.target.closest('.domain-card-remove')) return;
                     extensionAutoGenerate(entry.domain, {
-                        length: entry.length || passwordLength,
+                        length: clampLength(entry.length || passwordLength),
                         uppercase: entry.uppercase,
                         digits: entry.digits,
                         symbols: entry.symbols
@@ -1704,12 +2069,122 @@ const App = (() => {
         }, 2800);
     }
 
+    // Render one timed countdown-ring hint (a post-copy "occasional" message).
+    // Lifted out of the copy flow so the ?dev preview reuses the EXACT same
+    // renderer — no second copy to drift. `spec` is an entry from
+    // POST_COPY_HINTS; `anchor` is { left, width, top } in viewport coords (the
+    // cards' box in the real flow, a synthesized centered box in the preview);
+    // `onDone` runs after the hint fades out (navigate + restore in the real
+    // flow, advance to the next hint in the preview).
+    function showTimedHint(spec, anchor, onDone) {
+        const { sentences, maxWidth, seconds, icon } = spec;
+        // Each sentence is its own paragraph; the text still wraps naturally
+        // within the maxWidth column.
+        const paragraphs = sentences.map(s => `<p style="margin: 0;">${s}</p>`).join('');
+        // Outer container must be at least as wide as the requested maxWidth so
+        // the inner text div's max-width can actually take effect. Center it on
+        // the anchor's midpoint, then clamp to the viewport so wide hints don't
+        // overflow on small screens.
+        const VIEWPORT_PADDING = 16;
+        const desiredOuterWidth = Math.max(anchor.width, maxWidth + 40);
+        const outerWidth = Math.min(desiredOuterWidth, window.innerWidth - VIEWPORT_PADDING * 2);
+        const anchorCenter = anchor.left + anchor.width / 2;
+        let outerLeft = anchorCenter - outerWidth / 2;
+        outerLeft = Math.max(VIEWPORT_PADDING, Math.min(outerLeft, window.innerWidth - outerWidth - VIEWPORT_PADDING));
+
+        const hint = document.createElement('div');
+        Object.assign(hint.style, {
+            position: 'fixed',
+            left: outerLeft + 'px',
+            top: (anchor.top + 20) + 'px',
+            width: outerWidth + 'px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: '10',
+            pointerEvents: 'none',
+            opacity: '0',
+            transition: 'opacity 0.3s ease-out'
+        });
+
+        const ringSize = 44;
+        const strokeWidth = 3;
+        const radius = (ringSize - strokeWidth) / 2;
+        const circumference = 2 * Math.PI * radius;
+
+        hint.innerHTML = `
+            <div style="display: flex; flex-direction: column; align-items: center; gap: 18px;">
+                <div style="position: relative; width: ${ringSize}px; height: ${ringSize}px;">
+                    <svg width="${ringSize}" height="${ringSize}" viewBox="0 0 ${ringSize} ${ringSize}" style="transform: rotate(-90deg);">
+                        <circle cx="${ringSize / 2}" cy="${ringSize / 2}" r="${radius}" fill="none" stroke="var(--border)" stroke-width="${strokeWidth}"/>
+                        <circle class="hint-progress-ring" cx="${ringSize / 2}" cy="${ringSize / 2}" r="${radius}" fill="none" stroke="var(--brand)" stroke-width="${strokeWidth}" stroke-linecap="round" style="stroke-dasharray: ${circumference}; stroke-dashoffset: ${circumference}; transition: stroke-dashoffset ${seconds}s linear;"/>
+                    </svg>
+                    <div style="position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--text-3);">
+                        ${icon}
+                    </div>
+                </div>
+                <div style="font-size: 17px; color: var(--text-2); font-family: var(--font); text-align: center; max-width: ${maxWidth}px; line-height: 1.6; display: flex; flex-direction: column; gap: 16px;">${paragraphs}</div>
+            </div>
+        `;
+        document.body.appendChild(hint);
+        void hint.offsetHeight;
+        hint.style.opacity = '1';
+
+        // Trigger ring fill animation on next frame
+        const ring = hint.querySelector('.hint-progress-ring');
+        requestAnimationFrame(() => {
+            if (ring) ring.style.strokeDashoffset = '0';
+        });
+
+        const dismissHint = () => {
+            // Guard against double-call (autoTimer + back button race)
+            if (activeHintDismiss !== dismissHint) return;
+            activeHintDismiss = null;
+            clearTimeout(autoTimer);
+            hint.style.transition = 'opacity 0.4s ease-out';
+            hint.style.opacity = '0';
+            setTimeout(() => {
+                hint.remove();
+                onDone();
+            }, 400);
+        };
+
+        const autoTimer = setTimeout(dismissHint, seconds * 1000);
+        activeHintDismiss = dismissHint;
+    }
+
+    // ?dev preview: play every post-copy hint back-to-back, in trigger order
+    // Dev mode: ?dev query param (web, or the extension popup opened as a full
+    // tab) OR a persistent chrome.storage flag surfaced as window.pwdpalDevMode
+    // by popup-glue.js (the real toolbar popup carries no query string).
+    function isDevMode() {
+        try {
+            if (new URLSearchParams(window.location.search).has('dev')) return true;
+        } catch (_) {}
+        return window.pwdpalDevMode === true;
+    }
+
+    // Dev: play every post-copy hint back-to-back, in trigger order
+    // (POST_COPY_HINTS order = how soon a user first meets each), reusing the
+    // caller's anchor so they render at the real post-copy position. Runs
+    // `onDone` (navigate + restore) once, after the LAST hint — exactly as a
+    // single real hint would. Driven from the copy flow so the sequence shows
+    // at the natural moment, letting each hint be verified in context.
+    function playPostCopyHintSequence(anchor, onDone) {
+        let i = 0;
+        const playNext = () => {
+            if (i >= POST_COPY_HINTS.length) { onDone(); return; }
+            showTimedHint(POST_COPY_HINTS[i++], anchor, playNext);
+        };
+        playNext();
+    }
+
     async function onCardClick(clickedCard, entry) {
         // 1. Generate password and copy to clipboard
         const domain = entry.domain.replace(/^https?:\/\//, '').replace(/^www\./, '');
         const counter = parseInt(els.counterInput.value) || 1;
         const rules = {
-            length: entry.length || passwordLength,
+            length: clampLength(entry.length || passwordLength),
             uppercase: entry.uppercase,
             digits: entry.digits,
             symbols: entry.symbols
@@ -1863,114 +2338,19 @@ const App = (() => {
             confirmation.style.opacity = '0';
             setTimeout(() => {
                 confirmation.remove();
-                const lightbulbIcon = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6"/><path d="M10 22h4"/><path d="M12 2a7 7 0 0 0-4 12.7V17h8v-2.3A7 7 0 0 0 12 2z"/></svg>`;
-                const lockIcon = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>`;
-
-                const showHint = (messageHTML, maxWidth, totalSeconds, iconSVG) => {
-                    // Outer container must be at least as wide as the requested
-                    // maxWidth so the inner text div's max-width can actually take
-                    // effect. Re-center it around the cards' midpoint, then clamp
-                    // to the viewport so wide hints don't overflow on small screens.
-                    const VIEWPORT_PADDING = 16;
-                    const desiredOuterWidth = Math.max(cardsRect.width, maxWidth + 40);
-                    const outerWidth = Math.min(desiredOuterWidth, window.innerWidth - VIEWPORT_PADDING * 2);
-                    const cardsCenter = cardsRect.left + cardsRect.width / 2;
-                    let outerLeft = cardsCenter - outerWidth / 2;
-                    outerLeft = Math.max(VIEWPORT_PADDING, Math.min(outerLeft, window.innerWidth - outerWidth - VIEWPORT_PADDING));
-
-                    const hint = document.createElement('div');
-                    Object.assign(hint.style, {
-                        position: 'fixed',
-                        left: outerLeft + 'px',
-                        top: (subtitleRect.top + 20) + 'px',
-                        width: outerWidth + 'px',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        zIndex: '10',
-                        pointerEvents: 'none',
-                        opacity: '0',
-                        transition: 'opacity 0.3s ease-out'
-                    });
-
-                    const ringSize = 44;
-                    const strokeWidth = 3;
-                    const radius = (ringSize - strokeWidth) / 2;
-                    const circumference = 2 * Math.PI * radius;
-
-                    hint.innerHTML = `
-                        <div style="display: flex; flex-direction: column; align-items: center; gap: 18px;">
-                            <div style="position: relative; width: ${ringSize}px; height: ${ringSize}px;">
-                                <svg width="${ringSize}" height="${ringSize}" viewBox="0 0 ${ringSize} ${ringSize}" style="transform: rotate(-90deg);">
-                                    <circle cx="${ringSize / 2}" cy="${ringSize / 2}" r="${radius}" fill="none" stroke="var(--border)" stroke-width="${strokeWidth}"/>
-                                    <circle class="hint-progress-ring" cx="${ringSize / 2}" cy="${ringSize / 2}" r="${radius}" fill="none" stroke="var(--brand)" stroke-width="${strokeWidth}" stroke-linecap="round" style="stroke-dasharray: ${circumference}; stroke-dashoffset: ${circumference}; transition: stroke-dashoffset ${totalSeconds}s linear;"/>
-                                </svg>
-                                <div style="position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--text-3);">
-                                    ${iconSVG}
-                                </div>
-                            </div>
-                            <div style="font-size: 17px; color: var(--text-2); font-family: var(--font); text-align: center; max-width: ${maxWidth}px; line-height: 1.6;">${messageHTML}</div>
-                        </div>
-                    `;
-                    document.body.appendChild(hint);
-                    void hint.offsetHeight;
-                    hint.style.opacity = '1';
-
-                    // Trigger ring fill animation on next frame
-                    const ring = hint.querySelector('.hint-progress-ring');
-                    requestAnimationFrame(() => {
-                        if (ring) ring.style.strokeDashoffset = '0';
-                    });
-
-                    const dismissHint = () => {
-                        // Guard against double-call (autoTimer + back button race)
-                        if (activeHintDismiss !== dismissHint) return;
-                        activeHintDismiss = null;
-                        clearTimeout(autoTimer);
-                        hint.style.transition = 'opacity 0.4s ease-out';
-                        hint.style.opacity = '0';
-                        setTimeout(() => {
-                            hint.remove();
-                            goToScreen(1, true);
-                            setTimeout(restoreUI, 400);
-                        }, 400);
-                    };
-
-                    const autoTimer = setTimeout(dismissHint, totalSeconds * 1000);
-                    activeHintDismiss = dismissHint;
-                };
-
-                if (shouldShowSecurityHint) {
-                    showHint(
-                        `Remember, only you 
-                     <br>know your pattern and 
-                     <br>seed — that's what 
-                     <br>keeps you secure.
-                     <br>
-                     <br>The flip side: forget
-                     <br>either, and your
-                     <br>passwords are gone.
-                     <br>
-                     <span style="font-size: 12px;">
-                     <br>You can view your seed 
-                     <br>anytime under Settings.
-                     </span>`,
-                        600,
-                        SECURITY_HINT_SECONDS,
-                        lockIcon
-                    );
+                const anchor = { left: cardsRect.left, width: cardsRect.width, top: subtitleRect.top };
+                const onDone = () => { goToScreen(1, true); setTimeout(restoreUI, 400); };
+                if (isDevMode()) {
+                    // Dev: play EVERY post-copy hint in sequence, here at the
+                    // real post-copy moment and position, so each can be
+                    // verified in its true context (not on page load).
+                    playPostCopyHintSequence(anchor, onDone);
+                } else if (shouldShowSecurityHint) {
+                    showTimedHint(HINT_BY_KEY.security, anchor, onDone);
                 } else if (isFirstCardCopy) {
-                    showHint(
-                        `Note, your pattern is 
-                     <br>never stored — you'll 
-                     <br>draw it each time.`,
-                        260,
-                        PATTERN_HINT_SECONDS,
-                        lightbulbIcon
-                    );
+                    showTimedHint(HINT_BY_KEY.pattern, anchor, onDone);
                 } else {
-                    goToScreen(1, true);
-                    setTimeout(restoreUI, 400);
+                    onDone();
                 }
             }, THUMBS_UP_FADE_OUT_MS);
         }, THUMBS_UP_HOLD_MS);
@@ -2732,6 +3112,8 @@ const App = (() => {
 
     function onDomainScreenEnter() {
         editingDomain = null;
+        extOptionsMode = false;
+        if (els.optionsRestoreBtn) els.optionsRestoreBtn.style.display = 'none';
         renderDomainCards();
 
         if (savedDomains.length > 0) {
@@ -2792,6 +3174,11 @@ const App = (() => {
     }
 
     async function generatePassword() {
+        // Extension: when Save came from the overlay "Options" editor, route to
+        // the extension-mode save (persist + regenerate + re-show thumbs-up)
+        // instead of the web pill-back-to-card flow.
+        if (extOptionsMode) return saveExtensionOptions();
+
         const rawDomain = els.domainInput.value.trim();
         const domain = rawDomain
             .replace(/^https?:\/\//, '').replace(/^www\./, '');
